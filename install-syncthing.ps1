@@ -62,13 +62,23 @@ Write-Host "Creating config directory..." -ForegroundColor Yellow
 $configPath = "$InstallPath\config"
 New-Item -Path $configPath -ItemType Directory -Force | Out-Null
 
+# Create VBScript launcher to run Syncthing without console window
+Write-Host "Creating launcher script..." -ForegroundColor Yellow
+$vbsPath = "$InstallPath\syncthing-launcher.vbs"
+$vbsContent = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$syncthingExe"" --home=""$configPath""", 0, False
+Set WshShell = Nothing
+"@
+Set-Content -Path $vbsPath -Value $vbsContent -Force
+
 # Create Start Menu shortcut
 Write-Host "Creating Start Menu shortcut..." -ForegroundColor Yellow
 $WshShell = New-Object -ComObject WScript.Shell
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
 $Shortcut = $WshShell.CreateShortcut("$StartMenu\Programs\Syncthing.lnk")
-$Shortcut.TargetPath = $syncthingExe
-$Shortcut.Arguments = "--home=`"$configPath`""
+$Shortcut.TargetPath = "wscript.exe"
+$Shortcut.Arguments = "`"$vbsPath`""
 $Shortcut.WorkingDirectory = $InstallPath
 $Shortcut.IconLocation = "$syncthingExe,0"
 $Shortcut.Description = "Syncthing - File Synchronization"
