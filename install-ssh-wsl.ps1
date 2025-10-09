@@ -45,62 +45,31 @@ Write-Host ""
 
 $rebootNeeded = $false
 
-# ========== ENABLE WSL FEATURES ==========
-Write-Host "[1/3] Enabling WSL Features" -ForegroundColor Cyan
-Write-Host ""
-
-$changed1 = Enable-WindowsFeature "VirtualMachinePlatform"
-$changed2 = Enable-WindowsFeature "Microsoft-Windows-Subsystem-Linux"
-
-if ($changed1 -or $changed2 -or (Test-RebootRequired)) {
-    $rebootNeeded = $true
-}
-
-# ========== INSTALL WSL UBUNTU ==========
-Write-Host ""
-Write-Host "[2/3] Installing WSL Ubuntu" -ForegroundColor Cyan
-Write-Host ""
-
-$UbuntuVersion = "Ubuntu-22.04"
-
-# Check if Ubuntu is already installed
-$ubuntuInstalled = wsl --list 2>$null | Select-String $UbuntuVersion
-
-if (-not $ubuntuInstalled) {
-    Write-Host "Installing $UbuntuVersion..." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "IMPORTANT:" -ForegroundColor Red -BackgroundColor Yellow
-    Write-Host "Ubuntu will open in a new window for initial setup." -ForegroundColor Yellow
-    Write-Host "Please:" -ForegroundColor Yellow
-    Write-Host "  1. Create a username (lowercase, no spaces)" -ForegroundColor White
-    Write-Host "  2. Create a password" -ForegroundColor White
-    Write-Host "  3. Type 'exit' when complete" -ForegroundColor White
-    Write-Host ""
-    Write-Host "Press any key to continue..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    
-    wsl --install -d $UbuntuVersion
-    
-    Write-Host ""
-    Write-Host "Waiting for Ubuntu setup to complete..." -ForegroundColor Yellow
-    Write-Host "Complete the setup in the Ubuntu window, then press any key here..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    
-    Write-Host "$UbuntuVersion installed." -ForegroundColor Green
-} else {
-    Write-Host "$UbuntuVersion already installed." -ForegroundColor Gray
-}
-
 # ========== INSTALL OPENSSH SERVER ==========
-Write-Host ""
-Write-Host "[3/3] Installing OpenSSH Server" -ForegroundColor Cyan
+Write-Host "[1/3] Installing OpenSSH Server" -ForegroundColor Cyan
 Write-Host ""
 
 # Install OpenSSH Server
 $sshCapability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
 if ($sshCapability.State -ne "Installed") {
     Write-Host "Installing OpenSSH Server..." -ForegroundColor Yellow
-    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+    Write-Host "WARNING: This typically takes 5-10 minutes. Please be patient..." -ForegroundColor Red
+    Write-Host ""
+    
+    # Show progress dots while installing
+    $job = Start-Job -ScriptBlock {
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+    }
+    
+    while ($job.State -eq 'Running') {
+        Write-Host "." -NoNewline -ForegroundColor Gray
+        Start-Sleep -Seconds 3
+    }
+    
+    $result = Receive-Job -Job $job
+    Remove-Job -Job $job
+    
+    Write-Host ""
     Write-Host "OpenSSH Server installed." -ForegroundColor Green
 } else {
     Write-Host "OpenSSH Server already installed." -ForegroundColor Gray
@@ -123,6 +92,81 @@ if (-not $firewallRule) {
     Write-Host "Firewall rule already configured." -ForegroundColor Gray
 }
 
+# ========== ENABLE WSL FEATURES ==========
+Write-Host ""
+Write-Host "[2/3] Enabling WSL Features" -ForegroundColor Cyan
+Write-Host ""
+
+$changed1 = Enable-WindowsFeature "VirtualMachinePlatform"
+$changed2 = Enable-WindowsFeature "Microsoft-Windows-Subsystem-Linux"
+
+if ($changed1 -or $changed2 -or (Test-RebootRequired)) {
+    $rebootNeeded = $true
+}
+
+# ========== CHECK IF REBOOT NEEDED BEFORE CONTINUING ==========
+if ($rebootNeeded) {
+    Write-Host ""
+    Write-Host "=" * 60 -ForegroundColor Yellow
+    Write-Host "REBOOT REQUIRED" -ForegroundColor Yellow -BackgroundColor DarkRed
+    Write-Host "=" * 60 -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "OpenSSH Server: [OK] Installed" -ForegroundColor Green
+    Write-Host "WSL features have been enabled but require a restart before Ubuntu can be installed." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "After reboot, run this script again to install Ubuntu." -ForegroundColor Cyan
+    Write-Host ""
+    
+    $response = Read-Host "Would you like to restart now? (y/n)"
+    if ($response -eq 'y' -or $response -eq 'Y') {
+        Write-Host "Restarting computer..." -ForegroundColor Yellow
+        Restart-Computer -Force
+    }
+    exit 0
+}
+
+# ========== INSTALL WSL UBUNTU ==========
+Write-Host ""
+Write-Host "[3/3] Installing WSL Ubuntu" -ForegroundColor Cyan
+Write-Host ""
+
+$UbuntuVersion = "Ubuntu-22.04"
+
+# Check if Ubuntu is already installed
+$wslList = wsl --list --quiet 2>$null
+$ubuntuInstalled = $wslList | Where-Object { $_ -match $UbuntuVersion }
+
+if (-not $ubuntuInstalled) {
+    Write-Host "Installing $UbuntuVersion..." -ForegroundColor Yellow
+    Write-Host "(This may take a few minutes to download...)" -ForegroundColor Gray
+    Write-Host ""
+    
+    # Install Ubuntu (don't use --no-launch, let it launch automatically)
+    wsl --install -d $UbuntuVersion
+    
+    Write-Host ""
+    Write-Host "=" * 60 -ForegroundColor Yellow
+    Write-Host "UBUNTU SETUP REQUIRED" -ForegroundColor Yellow -BackgroundColor DarkBlue
+    Write-Host "=" * 60 -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Ubuntu window should have opened for first-time setup." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "In the Ubuntu window, you will be prompted to:" -ForegroundColor White
+    Write-Host "  1. Enter a new UNIX username (lowercase, no spaces)" -ForegroundColor Yellow
+    Write-Host "  2. Enter a password (you won't see it as you type)" -ForegroundColor Yellow
+    Write-Host "  3. Confirm the password" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "After setup completes, type 'exit' in Ubuntu to return here." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Press any key after you've completed Ubuntu setup..." -ForegroundColor Green
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    
+    Write-Host ""
+    Write-Host "$UbuntuVersion setup complete." -ForegroundColor Green
+} else {
+    Write-Host "$UbuntuVersion already installed." -ForegroundColor Gray
+}
+
 # ========== COMPLETION ==========
 Write-Host ""
 Write-Host "=" * 60 -ForegroundColor Green
@@ -132,6 +176,14 @@ Write-Host ""
 
 # Verify installations
 Write-Host "Verification:" -ForegroundColor Cyan
+Write-Host "  OpenSSH Server: " -NoNewline
+$sshService = Get-Service sshd -ErrorAction SilentlyContinue
+if ($sshService -and $sshService.Status -eq "Running") {
+    Write-Host "[OK] Running" -ForegroundColor Green
+} else {
+    Write-Host "[X] Not running" -ForegroundColor Red
+}
+
 Write-Host "  WSL: " -NoNewline
 $wslInstalled = Get-Command wsl -ErrorAction SilentlyContinue
 if ($wslInstalled) {
@@ -140,29 +192,15 @@ if ($wslInstalled) {
     Write-Host "[X] Not found" -ForegroundColor Red
 }
 
-Write-Host "  SSH Service: " -NoNewline
-$sshService = Get-Service sshd -ErrorAction SilentlyContinue
-if ($sshService -and $sshService.Status -eq "Running") {
-    Write-Host "[OK] Running" -ForegroundColor Green
+Write-Host "  Ubuntu: " -NoNewline
+$wslList = wsl --list --quiet 2>$null
+$ubuntuCheck = $wslList | Where-Object { $_ -match "Ubuntu" }
+if ($ubuntuCheck) {
+    Write-Host "[OK] Installed" -ForegroundColor Green
 } else {
-    Write-Host "[X] Not running" -ForegroundColor Red
+    Write-Host "[X] Not found" -ForegroundColor Red
 }
 
 Write-Host ""
-
-if ($rebootNeeded) {
-    Write-Host "REBOOT REQUIRED:" -ForegroundColor Yellow -BackgroundColor DarkRed
-    Write-Host "Windows features have been enabled that require a restart." -ForegroundColor Yellow
-    Write-Host "Please restart your computer to complete the installation." -ForegroundColor Yellow
-    Write-Host ""
-    
-    $response = Read-Host "Would you like to restart now? (y/n)"
-    if ($response -eq 'y' -or $response -eq 'Y') {
-        Write-Host "Restarting computer..." -ForegroundColor Yellow
-        Restart-Computer -Force
-    }
-} else {
-    Write-Host "Note: You may need to restart your terminal for all changes to take effect." -ForegroundColor Yellow
-}
-
+Write-Host "You can launch Ubuntu anytime by typing: wsl" -ForegroundColor Cyan
 Write-Host ""
