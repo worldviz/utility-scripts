@@ -67,7 +67,11 @@ Write-Host "Creating launcher script..." -ForegroundColor Yellow
 $vbsPath = "$InstallPath\syncthing-launcher.vbs"
 $vbsContent = @"
 Set WshShell = CreateObject("WScript.Shell")
+' Start Syncthing (if not already running, it will start; if running, it will fail silently)
 WshShell.Run """$syncthingExe"" --home=""$configPath""", 0, False
+' Always open the web UI
+WScript.Sleep 1000
+WshShell.Run "http://localhost:8384", 1, False
 Set WshShell = Nothing
 "@
 Set-Content -Path $vbsPath -Value $vbsContent -Force
