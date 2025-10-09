@@ -193,8 +193,16 @@ if ($wslInstalled) {
 }
 
 Write-Host "  Ubuntu: " -NoNewline
-$wslList = wsl --list --quiet 2>$null
-$ubuntuCheck = $wslList | Where-Object { $_ -match "Ubuntu" }
+$ubuntuCheck = $null
+try {
+    # Try to run wsl with the specific distro - if it works, it's installed
+    $testResult = wsl -d Ubuntu-22.04 echo "test" 2>&1
+    if ($testResult -eq "test") {
+        $ubuntuCheck = $true
+    }
+} catch {
+    $ubuntuCheck = $false
+}
 if ($ubuntuCheck) {
     Write-Host "[OK] Installed" -ForegroundColor Green
 } else {
