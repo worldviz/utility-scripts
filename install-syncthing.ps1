@@ -57,12 +57,18 @@ try {
     exit 1
 }
 
+# Create config directory
+Write-Host "Creating config directory..." -ForegroundColor Yellow
+$configPath = "$InstallPath\config"
+New-Item -Path $configPath -ItemType Directory -Force | Out-Null
+
 # Create Start Menu shortcut
 Write-Host "Creating Start Menu shortcut..." -ForegroundColor Yellow
 $WshShell = New-Object -ComObject WScript.Shell
 $StartMenu = [Environment]::GetFolderPath("CommonStartMenu")
 $Shortcut = $WshShell.CreateShortcut("$StartMenu\Programs\Syncthing.lnk")
 $Shortcut.TargetPath = $syncthingExe
+$Shortcut.Arguments = "--home=`"$configPath`""
 $Shortcut.WorkingDirectory = $InstallPath
 $Shortcut.IconLocation = "$syncthingExe,0"
 $Shortcut.Description = "Syncthing - File Synchronization"
@@ -78,7 +84,7 @@ Write-Host "  2. Run: $syncthingExe" -ForegroundColor White
 Write-Host ""
 Write-Host "Syncthing will:" -ForegroundColor Yellow
 Write-Host "  * Start automatically and open http://localhost:8384" -ForegroundColor White
-Write-Host "  * Create config in: %LOCALAPPDATA%\Syncthing" -ForegroundColor White
+Write-Host "  * Create config in: $configPath" -ForegroundColor White
 Write-Host "  * Show its device ID in the web interface" -ForegroundColor White
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
