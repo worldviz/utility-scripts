@@ -88,6 +88,18 @@ $Shortcut.IconLocation = "$syncthingExe,0"
 $Shortcut.Description = "Syncthing - File Synchronization"
 $Shortcut.Save()
 
+# Create Startup folder shortcut
+Write-Host "Creating Startup folder shortcut..." -ForegroundColor Yellow
+$StartupFolder = [Environment]::GetFolderPath("Startup")
+$StartupShortcut = $WshShell.CreateShortcut("$StartupFolder\Syncthing.lnk")
+$StartupShortcut.TargetPath = "wscript.exe"
+$StartupShortcut.Arguments = "`"$vbsPath`""
+$StartupShortcut.WorkingDirectory = $InstallPath
+$StartupShortcut.IconLocation = "$syncthingExe,0"
+$StartupShortcut.Description = "Syncthing - File Synchronization"
+$StartupShortcut.Save()
+Write-Host "Syncthing will now start automatically at login." -ForegroundColor Green
+
 Write-Host ""
 Write-Host "=== Installation Complete ===" -ForegroundColor Green
 Write-Host ""
