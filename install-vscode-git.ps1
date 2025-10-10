@@ -67,7 +67,49 @@ if ($gitInstalled -and $gitLfsInstalled) {
 }
 
 # Install Visual Studio Code
-Install-Package "Microsoft.VisualStudioCode"
+$vscodeInstalled = Install-Package "Microsoft.VisualStudioCode"
+
+# Configure PowerShell execution policy for Python venv activation
+Write-Host ""
+Write-Host "Configuring PowerShell execution policy for Python virtual environments..." -ForegroundColor Yellow
+try {
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+    Write-Host "Execution policy set to RemoteSigned for CurrentUser." -ForegroundColor Green
+    Write-Host "(This allows Python venv activation scripts to run in VS Code)" -ForegroundColor Gray
+} catch {
+    Write-Warning "Failed to set execution policy. You may need to run this manually:"
+    Write-Host "  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned" -ForegroundColor Yellow
+}
+
+# Install Python extension for VS Code
+if ($vscodeInstalled) {
+    Write-Host ""
+    Write-Host "Installing Python extension for VS Code..." -ForegroundColor Yellow
+    
+    # Wait a moment for VS Code to be fully available
+    Start-Sleep -Seconds 2
+    
+    # Try to install the Python extension
+    $codeCommand = Get-Command code -ErrorAction SilentlyContinue
+    if ($codeCommand) {
+        try {
+            & code --install-extension ms-python.python --force 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Python extension installed successfully." -ForegroundColor Green
+            } else {
+                Write-Warning "Python extension installation may have failed."
+                Write-Host "You can install it manually in VS Code by searching for 'Python' in the Extensions view." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Warning "Could not install Python extension automatically."
+            Write-Host "You can install it manually in VS Code by searching for 'Python' in the Extensions view." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "VS Code 'code' command not yet available in PATH." -ForegroundColor Yellow
+        Write-Host "After restarting your terminal, you can install the Python extension with:" -ForegroundColor Cyan
+        Write-Host "  code --install-extension ms-python.python" -ForegroundColor White
+    }
+}
 
 Write-Host ""
 Write-Host "=" * 60 -ForegroundColor Green
