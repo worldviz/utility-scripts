@@ -21,19 +21,24 @@ function Install-Package($PackageId) {
     Write-Host "Installing $PackageId..." -ForegroundColor Yellow
     
     # Check if already installed
+    Write-Host "  Checking if $PackageId is already installed..." -ForegroundColor Gray
     $installed = winget list --id $PackageId 2>$null | Select-String $PackageId
     if ($installed) {
-        Write-Host "$PackageId already installed." -ForegroundColor Gray
+        Write-Host "  $PackageId already installed." -ForegroundColor Green
         return $true
     }
     
-    # Install package
-    $result = winget install --id $PackageId -e --silent --accept-source-agreements --accept-package-agreements
+    # Install package (removed --silent to allow user interaction with dialogs)
+    Write-Host "  Starting installation of $PackageId..." -ForegroundColor Gray
+    Write-Host "  Note: You may need to respond to permission dialogs or agreements." -ForegroundColor Cyan
+    
+    $result = winget install --id $PackageId -e --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "$PackageId installed successfully." -ForegroundColor Green
+        Write-Host "  $PackageId installed successfully." -ForegroundColor Green
         return $true
     } else {
-        Write-Warning "$PackageId installation failed. You may need to install it manually."
+        Write-Warning "  $PackageId installation failed (Exit code: $LASTEXITCODE)."
+        Write-Host "  You may need to install it manually or check for permission issues." -ForegroundColor Yellow
         return $false
     }
 }
@@ -42,6 +47,11 @@ Clear-Host
 Write-Host "=" * 60 -ForegroundColor Cyan
 Write-Host "Installing Visual Studio Code and Git" -ForegroundColor Yellow
 Write-Host "=" * 60 -ForegroundColor Cyan
+Write-Host ""
+Write-Host "IMPORTANT NOTES:" -ForegroundColor Yellow
+Write-Host "- This script may prompt for permissions or agreements during installation" -ForegroundColor Cyan
+Write-Host "- If the script appears to hang, check for hidden dialog boxes (Alt+Tab)" -ForegroundColor Cyan
+Write-Host "- Large packages may take several minutes to download and install" -ForegroundColor Cyan
 Write-Host ""
 
 # Check winget availability
@@ -60,9 +70,15 @@ $gitLfsInstalled = Install-Package "GitHub.GitLFS"
 if ($gitInstalled -and $gitLfsInstalled) {
     Write-Host ""
     Write-Host "Configuring Git LFS..." -ForegroundColor Yellow
-    & git lfs install 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Git LFS configured successfully." -ForegroundColor Green
+    try {
+        & git lfs install 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Git LFS configured successfully." -ForegroundColor Green
+        } else {
+            Write-Warning "  Git LFS configuration failed. You may need to run 'git lfs install' manually."
+        }
+    } catch {
+        Write-Warning "  Could not configure Git LFS. Please ensure Git is properly installed and try 'git lfs install' manually."
     }
 }
 
