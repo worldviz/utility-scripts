@@ -44,7 +44,7 @@ foreach ($cmd in $pythonCommands) {
 if (-not $pythonCmd) {
     Write-Host "ERROR: Python is not installed or not in PATH." -ForegroundColor Red
     Write-Host "Please install Python from https://www.python.org/downloads/" -ForegroundColor Yellow
-    exit 1
+    return
 }
 
 Write-Host "Using Python: $pythonCmd" -ForegroundColor Green
@@ -66,12 +66,8 @@ try {
     # Run the Python script
     & $pythonCmd $tempPyFile
     
-    $exitCode = $LASTEXITCODE
-    
     # Clean up
     Remove-Item $tempPyFile -Force -ErrorAction SilentlyContinue
-    
-    exit $exitCode
 }
 catch {
     Write-Host ""
@@ -82,6 +78,4 @@ catch {
     if (Test-Path $tempPyFile) {
         Remove-Item $tempPyFile -Force -ErrorAction SilentlyContinue
     }
-    
-    exit 1
 }
