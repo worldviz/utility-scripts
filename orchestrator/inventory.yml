@@ -1,0 +1,14 @@
+# Inventory of client machines running the agent
+# Set the same token on agent env CARLA_AGENT_TOKEN and here.
+token: "scsu-bect"
+
+clients:
+  - name: rig-02
+    host: 10.24.0.51
+    port: 8081
+  - name: laptop-pc
+    host: 10.24.0.13
+    port: 8081
+  # - name: sim03
+  #   host: 192.168.10.103
+  #   port: 8081

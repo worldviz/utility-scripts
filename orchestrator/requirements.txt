@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+psutil
+pydantic
+requests
+pyyaml
