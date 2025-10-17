@@ -14,23 +14,21 @@ while giving you robust process control on Windows.
 
 ## Install (clients)
 
-1) Be sure Python 3.10 is installed (check using `py -0p` in powershell)
-
-2) You can run this script to setup the venv:
+1) Be sure Python 3.10 is installed (check using `py -0p` in powershell); otherwise install with:
+    `winget install Python.Python.3.10`
+2) You can run this one-liner to setup the venv:
 ```
-c:\wvlab\carla\source\SCSU\install-venv.ps1 -PythonVersion "3.10" -VenvPath "c:\wvlab\venv-orchestrator" -RequirementsFile .\orchestrator\requirements.txt
-```
-
-3) Set environment vars (PowerShell, per machine):
-
-```
-$env:CARLA_AGENT_TOKEN = "replace-with-a-strong-token"
-$env:CARLA_AGENT_METRICS_INTERVAL = "2.0"   # optional
-$env:CARLA_AGENT_HUNG_CPU_PCT = "1.0"       # optional
-$env:CARLA_AGENT_HUNG_SECS = "30.0"         # optional
+iwr -UseBasicParsing https://util.worldviz.com/install-venv.ps1 -OutFile "$env:TEMP\install-venv.ps1"; & "$env:TEMP\install-venv.ps1" -PythonVersion 3.10 -VenvPath 'C:\wvlab\venv-orchestrator' -RequirementsFile 'C:\wvlab\orchestrator\requirements.txt'
 ```
 
-4) Run the agent (PowerShell):
+3) Download orchestrator folder:
+   https://github.com/worldviz/utility-scripts/archive/refs/heads/main.zip
+4) Launch by running run_agent.bat (first edit line 41 for site specific password)
+
+
+
+Run the agent (PowerShell):
+
 ```
 uvicorn agent:app --host 0.0.0.0 --port 8081
 ```
