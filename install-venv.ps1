@@ -2,9 +2,9 @@
 # Reusable script that can be called from anywhere
 #
 # Usage Examples:
-#   .\setup_external_venv.ps1 -PythonVersion "3.7" -VenvPath "C:\wvlab\venv-carla" -RequirementsFile ".\requirements.txt"
-#   .\setup_external_venv.ps1 -PythonVersion "3.10" -VenvPath "C:\wvlab\venv-test" -Recreate
-#   .\setup_external_venv.ps1  # Uses defaults
+#   .\install-venv_venv.ps1 -PythonVersion "3.7" -VenvPath "C:\wvlab\venv-carla" -RequirementsFile ".\requirements.txt"
+#   .\install-venv_venv.ps1 -PythonVersion "3.10" -VenvPath "C:\wvlab\venv-test" -Recreate
+#   .\install-venv_venv.ps1  # Uses defaults
 
 param(
     [Parameter(Mandatory=$false)]
