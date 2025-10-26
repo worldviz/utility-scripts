@@ -15,6 +15,10 @@
     .\run-carla-doctor.ps1
 #>
 
+# Enable ANSI in current session (temporary)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$Host.UI.SupportsVirtualTerminal = $true
+
 $ErrorActionPreference = "Stop"
 
 # URL to the carla-doctor.py script
