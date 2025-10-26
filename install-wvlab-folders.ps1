@@ -7,9 +7,7 @@ Write-Host ""
 # Define folder structure (simplified!)
 $folders = @(
     "C:\wvlab",
-    "C:\wvlab\runtime",
-    "C:\wvlab\runtime\carla",
-    "C:\wvlab\runtime\carla-backup"
+    "C:\wvlab\carla",
 )
 
 # Create each folder
@@ -22,42 +20,6 @@ foreach ($folder in $folders) {
     }
 }
 
-# Create a README
-$readmeContent = @"
-# CARLA Lab Runtime Folder
-
-This folder contains the active CARLA installation that syncs across all lab nodes.
-
-## How It Works
-
-**Controller**: Manages the master CARLA installation in C:\lab\runtime\carla
-**Nodes**: Automatically sync to match the controller's installation
-**Deployment**: Just update CARLA on controller, all nodes follow automatically
-
-## Deploying Updates
-
-1. **Backup current** (on controller):
-   ``````
-   xcopy /E /I "C:\lab\runtime\carla" "C:\lab\runtime\carla-backup"
-   ``````
-
-2. **Deploy new version** (on controller):
-   ``````
-   xcopy /E /I "D:\CARLA_Build_v0.9.15" "C:\lab\runtime\carla"
-   ``````
-
-3. **Automatic sync**: Syncthing distributes to all nodes
-
-## Benefits
-
- **Simple**: One folder, direct sync
- **Automatic**: Nodes always match controller  
- **Fast**: No intermediate copying steps
- **Reliable**: Standard Syncthing folder sync
-"@
-
-$readmeContent | Out-File "C:\lab\runtime\README.md" -Encoding UTF8
-Write-Host "* Created README.md" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "=== Folder Setup Complete ===" -ForegroundColor Green
