@@ -30,15 +30,6 @@ Write-Host "[OK] Long Paths enabled" -ForegroundColor Green
 
 # Enable ANSI escape codes in consoles
 Write-Host "Enabling ANSI Escape Codes in Consoles..." -ForegroundColor Yellow
-# Required for proper ANSI color support in terminals
-# Ensure 'ForceV2' exists before setting it
-If (-not (Get-ItemProperty -Path "HKCU:\Console" -Name "ForceV2" -ErrorAction SilentlyContinue)) {
-    New-ItemProperty -Path "HKCU:\Console" -Name "ForceV2" -Value 1 -PropertyType DWord -Force | Out-Null
-} else {
-    Set-ItemProperty -Path "HKCU:\Console" -Name "ForceV2" -Value 1 -Type DWord -Force
-}
-    New-Item -Path "HKCU:\Console" | Out-Null
-}
 Set-ItemProperty -Path "HKCU:\Console" -Name "VirtualTerminalLevel" -Value 1 -Type DWord -Force
 Set-ItemProperty -Path "HKCU:\Console" -Name "ForceV2" -Value 1 -Type DWord -Force
 
