@@ -7,7 +7,7 @@ Write-Host ""
 # Define folder structure (simplified!)
 $folders = @(
     "C:\wvlab",
-    "C:\wvlab\carla",
+    "C:\wvlab\carla"
 )
 
 # Create each folder
