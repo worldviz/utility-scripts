@@ -44,6 +44,7 @@ if (-not (Test-Path $VenvParent)) {
 }
 
 # Check if venv already exists
+$CreateVenv = $true
 if (Test-Path $VenvPath) {
     if ($Recreate) {
         Write-Host "Removing existing venv at: $VenvPath" -ForegroundColor Yellow
@@ -51,16 +52,11 @@ if (Test-Path $VenvPath) {
     } else {
         Write-Host "venv already exists at: $VenvPath" -ForegroundColor Green
         Write-Host "To recreate, run with -Recreate flag" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Activating existing venv..." -ForegroundColor Cyan
-        & "$VenvPath\Scripts\Activate.ps1"
-        Write-Host ""
-        Write-Host "venv activated! Python location:" -ForegroundColor Green
-        python --version
-        Write-Host ""
-        return
+        $CreateVenv = $false
     }
 }
+
+if ($CreateVenv) {
 
 # Verify specified Python version is available via py launcher
 Write-Host "Checking for Python $PythonVersion via py launcher..." -ForegroundColor Cyan
@@ -91,6 +87,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "venv created successfully!" -ForegroundColor Green
 Write-Host ""
+
+} # End if ($CreateVenv)
 
 # Activate the venv
 Write-Host "Activating venv..." -ForegroundColor Cyan
