@@ -132,9 +132,29 @@ if ($tsip) { Write-Host ("Tailscale address: " + $tsip) -ForegroundColor Green }
 elseif ($joinSkipped) { $tsip = "(join pending - WorldViz will complete it)" }
 else { Write-Host "Tailscale has no address - resolve before continuing." -ForegroundColor Red; return }
 
-# ========== [3/5] OPENSSH SERVER ==========
+# ========== [3/5] OPTIONAL: CUSTOMER ON/OFF SWITCH ==========
 Write-Host ""
-Write-Host "[3/5] OpenSSH Server" -ForegroundColor Cyan
+Write-Host "[3/5] Customer on/off switch (optional)" -ForegroundColor Cyan
+Write-Host ""
+$ans = Read-Host "Place Enable/Disable WorldViz Support shortcuts on the shared desktop? (y/n)"
+if ($ans -match "^[yY]") {
+    $desk = Join-Path $env:PUBLIC "Desktop"
+    $enable = "@echo off`r`nREM Turns the WorldViz support tunnel ON.`r`n`"C:\Program Files\Tailscale\tailscale.exe`" up`r`necho.`r`necho WorldViz support tunnel is ON.`r`npause`r`n"
+    $disable = "@echo off`r`nREM Turns the WorldViz support tunnel OFF. Nothing is connected while off.`r`n`"C:\Program Files\Tailscale\tailscale.exe`" down`r`necho.`r`necho WorldViz support tunnel is OFF. No remote access is possible.`r`npause`r`n"
+    Set-Content -Path (Join-Path $desk "Enable WorldViz Support.cmd") -Value $enable -Encoding ASCII
+    Set-Content -Path (Join-Path $desk "Disable WorldViz Support.cmd") -Value $disable -Encoding ASCII
+    Write-Host "Shortcuts placed on the shared desktop." -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host ("=" * 60) -ForegroundColor Yellow
+Write-Host "ALL QUESTIONS DONE - the rest runs unattended (15-20 min)." -ForegroundColor Yellow -BackgroundColor DarkBlue
+Write-Host "You may leave this window running. Do NOT close it or reboot." -ForegroundColor Yellow
+Write-Host ("=" * 60) -ForegroundColor Yellow
+
+# ========== [4/5] OPENSSH SERVER ==========
+Write-Host ""
+Write-Host "[4/5] OpenSSH Server" -ForegroundColor Cyan
 Write-Host ""
 
 $cap = Get-WindowsCapability -Online -Name "OpenSSH.Server*" | Select-Object -First 1
@@ -161,9 +181,9 @@ Set-Service -Name sshd -StartupType Automatic
 Start-Service -Name sshd -ErrorAction SilentlyContinue
 Write-Host "OpenSSH Server installed and running." -ForegroundColor Green
 
-# ========== [4/5] FIREWALL: SSH visible ONLY over the tunnel ==========
+# ========== [5/5] FIREWALL: SSH visible ONLY over the tunnel ==========
 Write-Host ""
-Write-Host "[4/5] Firewall scoping" -ForegroundColor Cyan
+Write-Host "[5/5] Firewall scoping" -ForegroundColor Cyan
 Write-Host ""
 
 $tailnet = "100.64.0.0/10"
@@ -183,20 +203,6 @@ if ($scoped -eq 0) {
 }
 Write-Host "SSH is now invisible on the local network - reachable only via the tunnel." -ForegroundColor Green
 New-Item -ItemType Directory -Path "C:\wvlab" -Force | Out-Null
-
-# ========== [5/5] OPTIONAL: CUSTOMER ON/OFF SWITCH ==========
-Write-Host ""
-Write-Host "[5/5] Customer on/off switch (optional)" -ForegroundColor Cyan
-Write-Host ""
-$ans = Read-Host "Place Enable/Disable WorldViz Support shortcuts on the shared desktop? (y/n)"
-if ($ans -match "^[yY]") {
-    $desk = Join-Path $env:PUBLIC "Desktop"
-    $enable = "@echo off`r`nREM Turns the WorldViz support tunnel ON.`r`n`"C:\Program Files\Tailscale\tailscale.exe`" up`r`necho.`r`necho WorldViz support tunnel is ON.`r`npause`r`n"
-    $disable = "@echo off`r`nREM Turns the WorldViz support tunnel OFF. Nothing is connected while off.`r`n`"C:\Program Files\Tailscale\tailscale.exe`" down`r`necho.`r`necho WorldViz support tunnel is OFF. No remote access is possible.`r`npause`r`n"
-    Set-Content -Path (Join-Path $desk "Enable WorldViz Support.cmd") -Value $enable -Encoding ASCII
-    Set-Content -Path (Join-Path $desk "Disable WorldViz Support.cmd") -Value $disable -Encoding ASCII
-    Write-Host "Shortcuts placed on the shared desktop." -ForegroundColor Green
-}
 
 # ========== COMPLETION ==========
 Write-Host ""
