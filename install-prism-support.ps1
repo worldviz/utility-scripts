@@ -99,15 +99,27 @@ $already = (& $ts ip -4 2>$null)
 if ($already) {
     Write-Host ("Tailscale already joined: " + $already) -ForegroundColor Gray
 } else {
-    $key = Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now"
-    if (-not $key) {
-        $joinSkipped = $true
-        Write-Host "Skipping the join - Tailscale is installed and ready. WorldViz will" -ForegroundColor Yellow
-        Write-Host "complete the join later; continuing with the rest of the setup." -ForegroundColor Yellow
+    while ($true) {
+        $key = (Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now").Trim()
+        if (-not $key) {
+            $joinSkipped = $true
+            Write-Host "Skipping the join - Tailscale is installed and ready. WorldViz will" -ForegroundColor Yellow
+            Write-Host "complete the join later; continuing with the rest of the setup." -ForegroundColor Yellow
+            break
+        }
+        if ($key -match "^tskey-") { break }
+        Write-Host "That does not look like a Tailscale auth key (they start with tskey-)." -ForegroundColor Red
+        Write-Host "Paste ONLY the key on one line, or press Enter to skip the join." -ForegroundColor Yellow
     }
 }
 if (-not $already -and -not $joinSkipped) {
-    $site = Read-Host "Site short name from WorldViz (e.g. sioux)"
+    $site = ""
+    while ($site -notmatch "^[a-z0-9][a-z0-9-]*$") {
+        $site = (Read-Host "Site short name from WorldViz (lowercase, e.g. sioux)").Trim().ToLower()
+        if ($site -notmatch "^[a-z0-9][a-z0-9-]*$") {
+            Write-Host "One short word: lowercase letters, digits, hyphens only." -ForegroundColor Red
+        }
+    }
     Write-Host "Joining tailnet (this should take a few seconds)..." -ForegroundColor Yellow
     $job = Start-Job -ScriptBlock {
         param($exe, $k, $h)
