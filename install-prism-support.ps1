@@ -94,12 +94,20 @@ if (-not (Test-Path $ts)) {
 $svc = Get-Service -Name Tailscale -ErrorAction SilentlyContinue
 if ($svc -and $svc.Status -ne "Running") { Start-Service -Name Tailscale; Start-Sleep -Seconds 2 }
 
+$joinSkipped = $false
 $already = (& $ts ip -4 2>$null)
 if ($already) {
     Write-Host ("Tailscale already joined: " + $already) -ForegroundColor Gray
 } else {
+    $key = Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now"
+    if (-not $key) {
+        $joinSkipped = $true
+        Write-Host "Skipping the join - Tailscale is installed and ready. WorldViz will" -ForegroundColor Yellow
+        Write-Host "complete the join later; continuing with the rest of the setup." -ForegroundColor Yellow
+    }
+}
+if (-not $already -and -not $joinSkipped) {
     $site = Read-Host "Site short name from WorldViz (e.g. sioux)"
-    $key = Read-Host "Tailscale auth key from WorldViz (tskey-auth-...)"
     Write-Host "Joining tailnet (this should take a few seconds)..." -ForegroundColor Yellow
     $job = Start-Job -ScriptBlock {
         param($exe, $k, $h)
@@ -121,6 +129,7 @@ if ($already) {
 }
 $tsip = (& $ts ip -4 2>$null)
 if ($tsip) { Write-Host ("Tailscale address: " + $tsip) -ForegroundColor Green }
+elseif ($joinSkipped) { $tsip = "(join pending - WorldViz will complete it)" }
 else { Write-Host "Tailscale has no address - resolve before continuing." -ForegroundColor Red; return }
 
 # ========== [3/5] OPENSSH SERVER ==========
@@ -206,7 +215,12 @@ $scopes = @(Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow |
     ForEach-Object { ($_ | Get-NetFirewallAddressFilter).RemoteAddress })
 Write-Host ("  SSH visibility: " + (($scopes | Select-Object -Unique) -join ", ")) -ForegroundColor White
 Write-Host ""
-Write-Host "READ THIS ADDRESS TO WORLDVIZ:  $tsip" -ForegroundColor Yellow -BackgroundColor DarkBlue
+if ($joinSkipped) {
+    Write-Host "SETUP DONE EXCEPT THE JOIN. When WorldViz provides the key, run" -ForegroundColor Yellow -BackgroundColor DarkBlue
+    Write-Host "this script again - it will skip everything already done." -ForegroundColor Yellow
+} else {
+    Write-Host "READ THIS ADDRESS TO WORLDVIZ:  $tsip" -ForegroundColor Yellow -BackgroundColor DarkBlue
+}
 Write-Host ""
 Write-Host "WorldViz will then verify the connection and complete their side" -ForegroundColor Gray
 Write-Host "(key-expiry disable, isolation checks)." -ForegroundColor Gray
