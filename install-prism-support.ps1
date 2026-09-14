@@ -6,6 +6,7 @@
            + rig-LAN network guard + optional customer on/off switch.
   Run remotely:  iwr -useb util.worldviz.com/install-prism-support.ps1 | iex
   Idempotent - safe to re-run; completed steps are skipped.
+  Writes a transcript to C:\wvlab\install-prism-support-<timestamp>.log
 #>
 
 # Check for Administrator privileges
@@ -16,6 +17,14 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administra
     Write-Host "Right-click PowerShell, 'Run as Administrator', then re-run the command." -ForegroundColor Yellow
     return
 }
+
+# Log everything. Close any stale transcript first so a re-run in the same
+# window is still logged.
+New-Item -ItemType Directory -Path "C:\wvlab" -Force | Out-Null
+$logPath = "C:\wvlab\install-prism-support-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".log"
+try { Stop-Transcript | Out-Null } catch { }
+$transcriptOn = $false
+try { Start-Transcript -Path $logPath | Out-Null; $transcriptOn = $true } catch { }
 
 Clear-Host
 Write-Host ("=" * 60) -ForegroundColor Cyan
@@ -46,26 +55,40 @@ if ($gwCount -gt 1) {
 }
 $ans = Read-Host "Is one of these adapters the PROJECTOR/RIG LAN (no internet)? (y/n)"
 if ($ans -match "^[yY]") {
-    $idx = Read-Host "Enter its number from the list above"
-    $rig = $cfgs[[int]$idx]
-    if ($rig) {
-        $alias = $rig.InterfaceAlias
-        $curIp = $rig.IPv4Address.IPAddress | Select-Object -First 1
-        $curLen = ($rig.IPv4Address | Select-Object -First 1).PrefixLength
-        if (-not $curLen) { $curLen = 24 }
-        Write-Host ""
-        Write-Host ("Converting '{0}' to STATIC {1}/{2}, NO gateway, NO DNS (fleet standard)..." -f $alias, $curIp, $curLen) -ForegroundColor Yellow
-        $go = Read-Host "Proceed? (y/n)"
-        if ($go -match "^[yY]") {
-            Set-NetIPInterface -InterfaceAlias $alias -Dhcp Disabled
-            Get-NetIPAddress -InterfaceAlias $alias -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-                Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
-            Get-NetRoute -InterfaceAlias $alias -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
-                Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-            New-NetIPAddress -InterfaceAlias $alias -IPAddress $curIp -PrefixLength $curLen | Out-Null
-            Set-DnsClientServerAddress -InterfaceAlias $alias -ResetServerAddresses
-            Write-Host "Rig LAN adapter converted." -ForegroundColor Green
-            Write-Host "NOTE: ask WorldViz to reserve this IP on the rig router (DHCP reservation)." -ForegroundColor Yellow
+    # Which adapter currently carries traffic to the internet? Never strip that
+    # one - doing so kills the internet and drops any remote-support session.
+    $inetIdx = (Find-NetRoute -RemoteIPAddress 1.1.1.1 -ErrorAction SilentlyContinue |
+        Select-Object -First 1).InterfaceIndex
+    $idx = (Read-Host "Enter its number from the list above").Trim()
+    if ($idx -notmatch "^\d+$" -or [int]$idx -ge $cfgs.Count) {
+        Write-Host ("Not one of the numbers listed (0-" + ($cfgs.Count - 1) + "). Leaving the network as-is.") -ForegroundColor Red
+    } else {
+        $rig = $cfgs[[int]$idx]
+        if ($inetIdx -and $rig.InterfaceIndex -eq $inetIdx) {
+            Write-Host ""
+            Write-Host ("REFUSING: '" + $rig.InterfaceAlias + "' is the adapter this machine is") -ForegroundColor Red
+            Write-Host "currently using to reach the internet." -ForegroundColor Red
+            Write-Host "Stripping its gateway would cut internet access and drop any remote" -ForegroundColor Yellow
+            Write-Host "support session. Re-run and pick the rig-LAN adapter instead." -ForegroundColor Yellow
+        } else {
+            $alias = $rig.InterfaceAlias
+            $curIp = $rig.IPv4Address.IPAddress | Select-Object -First 1
+            $curLen = ($rig.IPv4Address | Select-Object -First 1).PrefixLength
+            if (-not $curLen) { $curLen = 24 }
+            Write-Host ""
+            Write-Host ("Converting '{0}' to STATIC {1}/{2}, NO gateway, NO DNS (fleet standard)..." -f $alias, $curIp, $curLen) -ForegroundColor Yellow
+            $go = Read-Host "Proceed? (y/n)"
+            if ($go -match "^[yY]") {
+                Set-NetIPInterface -InterfaceAlias $alias -Dhcp Disabled
+                Get-NetIPAddress -InterfaceAlias $alias -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+                Get-NetRoute -InterfaceAlias $alias -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+                    Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+                New-NetIPAddress -InterfaceAlias $alias -IPAddress $curIp -PrefixLength $curLen | Out-Null
+                Set-DnsClientServerAddress -InterfaceAlias $alias -ResetServerAddresses
+                Write-Host "Rig LAN adapter converted." -ForegroundColor Green
+                Write-Host "NOTE: ask WorldViz to reserve this IP on the rig router (DHCP reservation)." -ForegroundColor Yellow
+            }
         }
     }
 } else {
@@ -89,6 +112,7 @@ if (-not (Test-Path $ts)) {
     Write-Host "Tailscale not found after install. Install manually from:" -ForegroundColor Red
     Write-Host "  https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -ForegroundColor Yellow
     Write-Host "then re-run this script." -ForegroundColor Yellow
+    try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
     return
 }
 $svc = Get-Service -Name Tailscale -ErrorAction SilentlyContinue
@@ -97,7 +121,29 @@ if ($svc -and $svc.Status -ne "Running") { Start-Service -Name Tailscale; Start-
 $joinSkipped = $false
 $already = (& $ts ip -4 2>$null)
 if ($already) {
-    Write-Host ("Tailscale already joined: " + $already) -ForegroundColor Gray
+    # Every WV-imaged IG is hostname WV-PRISM-IG. If this box was imaged from
+    # another site it may already carry THAT site's node name and tag.
+    $selfName = ""
+    $selfTags = "none"
+    try {
+        $st = (& $ts status --json 2>$null | Out-String | ConvertFrom-Json)
+        $selfName = $st.Self.HostName
+        if ($st.Self.Tags) { $selfTags = ($st.Self.Tags -join ",") }
+    } catch { }
+    Write-Host ("Tailscale already joined: " + ($already -join " ")) -ForegroundColor Gray
+    if ($selfName) {
+        Write-Host ("  node name: " + $selfName + "    tags: " + $selfTags) -ForegroundColor Gray
+        Write-Host "If this machine was imaged from another site, that name and tag belong" -ForegroundColor Yellow
+        Write-Host "to the OTHER site - it must not keep them." -ForegroundColor Yellow
+        $ok = Read-Host "Is that the correct identity for THIS site? (y/n)"
+        if ($ok -notmatch "^[yY]") {
+            Write-Host ""
+            Write-Host "Run this to drop the old identity, then re-run this script:" -ForegroundColor Yellow
+            Write-Host '  & "C:\Program Files\Tailscale\tailscale.exe" logout' -ForegroundColor White
+            try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+            return
+        }
+    }
 } else {
     while ($true) {
         $key = (Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now").Trim()
@@ -120,6 +166,24 @@ if (-not $already -and -not $joinSkipped) {
             Write-Host "One short word: lowercase letters, digits, hyphens only." -ForegroundColor Red
         }
     }
+    # Preflight: the join cannot work without outbound 443, and finding that
+    # out here takes 2 seconds instead of a 90-second timeout.
+    Write-Host "Checking outbound 443 to Tailscale..." -ForegroundColor Gray
+    $pre = Test-NetConnection controlplane.tailscale.com -Port 443 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+    if ($pre.TcpTestSucceeded) {
+        Write-Host "  [OK] reachable" -ForegroundColor Green
+    } else {
+        Write-Host "  [X] cannot reach controlplane.tailscale.com:443" -ForegroundColor Red
+        Write-Host "  The join will not work until that is open. Usual causes: facility" -ForegroundColor Yellow
+        Write-Host "  firewall blocks 443, no internet on this machine, or the rig-LAN" -ForegroundColor Yellow
+        Write-Host "  gateway trap (step 1 above)." -ForegroundColor Yellow
+        $go2 = Read-Host "Try the join anyway? (y/n)"
+        if ($go2 -notmatch "^[yY]") {
+            Write-Host "Stopping. Fix the network and re-run this script." -ForegroundColor Yellow
+            try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+            return
+        }
+    }
     Write-Host "Joining tailnet (this should take a few seconds)..." -ForegroundColor Yellow
     $job = Start-Job -ScriptBlock {
         param($exe, $k, $h)
@@ -134,6 +198,7 @@ if (-not $already -and -not $joinSkipped) {
         Write-Host "     test:  Test-NetConnection controlplane.tailscale.com -Port 443" -ForegroundColor Gray
         Write-Host "Fix and re-run this script." -ForegroundColor Yellow
         Remove-Job $job -Force
+        try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
         return
     }
     Receive-Job $job | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Gray }
@@ -142,7 +207,11 @@ if (-not $already -and -not $joinSkipped) {
 $tsip = (& $ts ip -4 2>$null)
 if ($tsip) { Write-Host ("Tailscale address: " + $tsip) -ForegroundColor Green }
 elseif ($joinSkipped) { $tsip = "(join pending - WorldViz will complete it)" }
-else { Write-Host "Tailscale has no address - resolve before continuing." -ForegroundColor Red; return }
+else {
+    Write-Host "Tailscale has no address - resolve before continuing." -ForegroundColor Red
+    try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+    return
+}
 
 # ========== [3/5] OPTIONAL: CUSTOMER ON/OFF SWITCH ==========
 Write-Host ""
@@ -187,6 +256,7 @@ if ($cap.State -ne "Installed") {
     Write-Host "OpenSSH capability install failed twice. On WSUS-managed machines try:" -ForegroundColor Red
     Write-Host "  winget install --id Microsoft.OpenSSH.Preview -e" -ForegroundColor Yellow
     Write-Host "then re-run this script." -ForegroundColor Yellow
+    try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
     return
 }
 Set-Service -Name sshd -StartupType Automatic
@@ -200,11 +270,16 @@ Write-Host ""
 
 $tailnet = "100.64.0.0/10"
 $scoped = 0
-Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -ErrorAction SilentlyContinue | ForEach-Object {
+# Deliberately NOT filtered to -Enabled True: a disabled port-22 rule left at
+# RemoteAddress=Any is a loaded gun. Anything that later enables it (sshd
+# reinstall, an admin clicking "allow") would expose SSH on the customer LAN.
+Get-NetFirewallRule -Direction Inbound -Action Allow -ErrorAction SilentlyContinue | ForEach-Object {
     $pf = $_ | Get-NetFirewallPortFilter
     if ($pf.Protocol -eq "TCP" -and $pf.LocalPort -eq 22) {
         Set-NetFirewallRule -Name $_.Name -RemoteAddress $tailnet
-        Write-Host ("  scoped rule: " + $_.DisplayName) -ForegroundColor Green
+        $state = "enabled"
+        if ($_.Enabled -ne "True") { $state = "disabled" }
+        Write-Host ("  scoped rule: " + $_.DisplayName + " (" + $state + ")") -ForegroundColor Green
         $scoped++
     }
 }
@@ -214,7 +289,6 @@ if ($scoped -eq 0) {
     Write-Host "  created scoped rule 'OpenSSH tailnet only'" -ForegroundColor Green
 }
 Write-Host "SSH is now invisible on the local network - reachable only via the tunnel." -ForegroundColor Green
-New-Item -ItemType Directory -Path "C:\wvlab" -Force | Out-Null
 
 # ========== COMPLETION ==========
 Write-Host ""
@@ -228,10 +302,11 @@ $svc = Get-Service sshd -ErrorAction SilentlyContinue
 $sshTxt = "[X] not running"
 if ($svc -and $svc.Status -eq "Running") { $sshTxt = "[OK] running" }
 Write-Host ("  OpenSSH:        " + $sshTxt) -ForegroundColor White
-$scopes = @(Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow |
+$scopes = @(Get-NetFirewallRule -Direction Inbound -Action Allow -ErrorAction SilentlyContinue |
     Where-Object { ($_ | Get-NetFirewallPortFilter).LocalPort -eq 22 } |
     ForEach-Object { ($_ | Get-NetFirewallAddressFilter).RemoteAddress })
 Write-Host ("  SSH visibility: " + (($scopes | Select-Object -Unique) -join ", ")) -ForegroundColor White
+Write-Host ("  Log file:       " + $logPath) -ForegroundColor White
 Write-Host ""
 if ($joinSkipped) {
     Write-Host "SETUP DONE EXCEPT THE JOIN. When WorldViz provides the key, run" -ForegroundColor Yellow -BackgroundColor DarkBlue
@@ -243,3 +318,4 @@ Write-Host ""
 Write-Host "WorldViz will then verify the connection and complete their side" -ForegroundColor Gray
 Write-Host "(key-expiry disable, isolation checks)." -ForegroundColor Gray
 Write-Host ""
+try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
