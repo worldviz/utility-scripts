@@ -7,7 +7,30 @@
   Run remotely:  iwr -useb util.worldviz.com/install-prism-support.ps1 | iex
   Idempotent - safe to re-run; completed steps are skipped.
   Writes a transcript to C:\wvlab\install-prism-support-<timestamp>.log
+
+  Zero-prompt form (paste one line, type nothing):
+    & ([scriptblock]::Create((iwr -useb util.worldviz.com/install-prism-support.ps1).Content)) `
+        -Site ccreek -AuthKey tskey-auth-XXXX
+
+  Supplying -Site and -AuthKey implies unattended mode: the rig-LAN question
+  and the desktop-switch question are skipped unless -RigLanIndex or
+  -DesktopSwitch are given. With no parameters it prompts exactly as before.
 #>
+
+param(
+    # Site short name, lowercase, WITHOUT the "prism-" prefix (the script adds it).
+    [string]$Site,
+    # Tailscale auth key, pre-tagged tag:prism-<site>.
+    [string]$AuthKey,
+    # Index of the rig-LAN adapter from the list the script prints. Omit to
+    # leave the network alone.
+    [int]$RigLanIndex = -1,
+    # Place the customer Enable/Disable shortcuts on the shared desktop.
+    [switch]$DesktopSwitch
+)
+
+# Parameters supplied => run without asking questions.
+$unattended = ($Site -and $AuthKey)
 
 # Check for Administrator privileges
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -53,13 +76,22 @@ $gwCount = @($cfgs | Where-Object { $_.IPv4DefaultGateway }).Count
 if ($gwCount -gt 1) {
     Write-Host "WARNING: multiple default gateways found - one is likely the rig LAN." -ForegroundColor Red
 }
-$ans = Read-Host "Is one of these adapters the PROJECTOR/RIG LAN (no internet)? (y/n)"
+$ans = "n"
+if ($RigLanIndex -ge 0) {
+    $ans = "y"
+    Write-Host ("Rig-LAN adapter given as parameter: [" + $RigLanIndex + "]") -ForegroundColor Gray
+} elseif (-not $unattended) {
+    $ans = Read-Host "Is one of these adapters the PROJECTOR/RIG LAN (no internet)? (y/n)"
+} else {
+    Write-Host "Unattended: leaving the network alone (pass -RigLanIndex to change it)." -ForegroundColor Gray
+}
 if ($ans -match "^[yY]") {
     # Which adapter currently carries traffic to the internet? Never strip that
     # one - doing so kills the internet and drops any remote-support session.
     $inetIdx = (Find-NetRoute -RemoteIPAddress 1.1.1.1 -ErrorAction SilentlyContinue |
         Select-Object -First 1).InterfaceIndex
-    $idx = (Read-Host "Enter its number from the list above").Trim()
+    $idx = "$RigLanIndex"
+    if ($RigLanIndex -lt 0) { $idx = (Read-Host "Enter its number from the list above").Trim() }
     if ($idx -notmatch "^\d+$" -or [int]$idx -ge $cfgs.Count) {
         Write-Host ("Not one of the numbers listed (0-" + ($cfgs.Count - 1) + "). Leaving the network as-is.") -ForegroundColor Red
     } else {
@@ -77,7 +109,8 @@ if ($ans -match "^[yY]") {
             if (-not $curLen) { $curLen = 24 }
             Write-Host ""
             Write-Host ("Converting '{0}' to STATIC {1}/{2}, NO gateway, NO DNS (fleet standard)..." -f $alias, $curIp, $curLen) -ForegroundColor Yellow
-            $go = Read-Host "Proceed? (y/n)"
+            $go = "y"
+            if (-not $unattended) { $go = Read-Host "Proceed? (y/n)" }
             if ($go -match "^[yY]") {
                 Set-NetIPInterface -InterfaceAlias $alias -Dhcp Disabled
                 Get-NetIPAddress -InterfaceAlias $alias -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -146,6 +179,16 @@ if ($already) {
     }
 } else {
     while ($true) {
+        if ($AuthKey) {
+            $key = $AuthKey.Trim()
+            Write-Host "Using auth key supplied as a parameter." -ForegroundColor Gray
+            if ($key -notmatch "^tskey-") {
+                Write-Host "The -AuthKey value does not look like a Tailscale auth key (tskey-...)." -ForegroundColor Red
+                try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+                return
+            }
+            break
+        }
         $key = (Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now").Trim()
         if (-not $key) {
             $joinSkipped = $true
@@ -160,11 +203,25 @@ if ($already) {
 }
 if (-not $already -and -not $joinSkipped) {
     $site = ""
-    while ($site -notmatch "^[a-z0-9][a-z0-9-]*$") {
-        $site = (Read-Host "Site short name from WorldViz (lowercase, e.g. sioux)").Trim().ToLower()
-        if ($site -notmatch "^[a-z0-9][a-z0-9-]*$") {
+    if ($Site) { $site = $Site.Trim().ToLower() }
+    while ($site -notmatch "^[a-z0-9][a-z0-9-]*$" -or $site -like "prism-*") {
+        if ($site -like "prism-*") {
+            # The node name is built as "prism-<site>"; a site name that already
+            # carries the prefix produces prism-prism-<site>.
+            Write-Host ("Do not include the 'prism-' prefix - the script adds it. Use '" +
+                        ($site -replace "^prism-", "") + "', not '" + $site + "'.") -ForegroundColor Red
+            if ($Site) {
+                try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+                return
+            }
+        } elseif ($site -ne "") {
             Write-Host "One short word: lowercase letters, digits, hyphens only." -ForegroundColor Red
+            if ($Site) {
+                try { if ($transcriptOn) { Stop-Transcript | Out-Null } } catch { }
+                return
+            }
         }
+        $site = (Read-Host "Site short name from WorldViz (lowercase, e.g. sioux - no 'prism-' prefix)").Trim().ToLower()
     }
     # Preflight: the join cannot work without outbound 443, and finding that
     # out here takes 2 seconds instead of a 90-second timeout.
@@ -213,11 +270,60 @@ else {
     return
 }
 
+# ---- TAG ASSERTION -------------------------------------------------------
+# The entire isolation model depends on this node being TAGGED. A tagged node
+# is not in autogroup:member, so with no src grant it can reach nothing. An
+# UNTAGGED node joins as one of Andy's own devices and inherits the
+# member->member grant: full access to his Mac, phone and every VPS.
+# An auth key generated without its tag selected produces exactly that, and
+# it otherwise looks like a completely successful install.
+$tagOK = $false
+$tagNote = ""
+if (-not $joinSkipped) {
+    $selfTags = @()
+    $selfName = ""
+    try {
+        $st = (& $ts status --json 2>$null | Out-String | ConvertFrom-Json)
+        $selfName = $st.Self.HostName
+        if ($st.Self.Tags) { $selfTags = @($st.Self.Tags) }
+    } catch { }
+
+    if ($selfTags.Count -gt 0) {
+        $tagOK = $true
+        Write-Host ("Tags: " + ($selfTags -join ", ")) -ForegroundColor Green
+        if ($site -and ($selfTags -notcontains ("tag:prism-" + $site))) {
+            $tagNote = "node is tagged, but not with tag:prism-$site"
+            Write-Host ("  NOTE: expected tag:prism-" + $site) -ForegroundColor Yellow
+        }
+    } else {
+        $tagNote = "NODE JOINED UNTAGGED"
+        Write-Host ""
+        Write-Host ("!" * 60) -ForegroundColor Red
+        Write-Host " THIS NODE JOINED UNTAGGED - STOP AND TELL WORLDVIZ NOW" -ForegroundColor Yellow -BackgroundColor DarkRed
+        Write-Host ("!" * 60) -ForegroundColor Red
+        Write-Host " The auth key was not carrying its tag, so this machine has" -ForegroundColor Yellow
+        Write-Host " joined as a regular member device instead of an isolated site" -ForegroundColor Yellow
+        Write-Host " node. Until it is tagged it can reach other machines on the" -ForegroundColor Yellow
+        Write-Host " tailnet - the one-way door is NOT in place." -ForegroundColor Yellow
+        Write-Host "" 
+        Write-Host " Fix (WorldViz, admin console): Machines -> this node ->" -ForegroundColor Gray
+        Write-Host " Edit ACL tags -> add tag:prism-<site>. No reinstall needed." -ForegroundColor Gray
+        Write-Host ("!" * 60) -ForegroundColor Red
+        Write-Host ""
+    }
+    if ($selfName -and $site -and $selfName -ne ("prism-" + $site)) {
+        Write-Host ("NOTE: node name is '" + $selfName + "', expected 'prism-" + $site + "'.") -ForegroundColor Yellow
+        if (-not $tagNote) { $tagNote = "node name is $selfName" }
+    }
+}
+
 # ========== [3/5] OPTIONAL: CUSTOMER ON/OFF SWITCH ==========
 Write-Host ""
 Write-Host "[3/5] Customer on/off switch (optional)" -ForegroundColor Cyan
 Write-Host ""
-$ans = Read-Host "Place Enable/Disable WorldViz Support shortcuts on the shared desktop? (y/n)"
+$ans = "n"
+if ($DesktopSwitch) { $ans = "y" }
+elseif (-not $unattended) { $ans = Read-Host "Place Enable/Disable WorldViz Support shortcuts on the shared desktop? (y/n)" }
 if ($ans -match "^[yY]") {
     $desk = Join-Path $env:PUBLIC "Desktop"
     $enable = "@echo off`r`nREM Turns the WorldViz support tunnel ON.`r`n`"C:\Program Files\Tailscale\tailscale.exe`" up`r`necho.`r`necho WorldViz support tunnel is ON.`r`npause`r`n"
@@ -307,6 +413,15 @@ $scopes = @(Get-NetFirewallRule -Direction Inbound -Action Allow -ErrorAction Si
     ForEach-Object { ($_ | Get-NetFirewallAddressFilter).RemoteAddress })
 Write-Host ("  SSH visibility: " + (($scopes | Select-Object -Unique) -join ", ")) -ForegroundColor White
 Write-Host ("  Log file:       " + $logPath) -ForegroundColor White
+if (-not $joinSkipped) {
+    if ($tagOK -and -not $tagNote) {
+        Write-Host "  Tag check:      [OK] tagged - isolation in place" -ForegroundColor Green
+    } elseif ($tagOK) {
+        Write-Host ("  Tag check:      [!] " + $tagNote) -ForegroundColor Yellow
+    } else {
+        Write-Host "  Tag check:      [X] UNTAGGED - NOT ISOLATED - tell WorldViz" -ForegroundColor Yellow -BackgroundColor DarkRed
+    }
+}
 Write-Host ""
 if ($joinSkipped) {
     Write-Host "SETUP DONE EXCEPT THE JOIN. When WorldViz provides the key, run" -ForegroundColor Yellow -BackgroundColor DarkBlue
