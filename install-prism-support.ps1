@@ -13,8 +13,14 @@
         -Site ccreek -AuthKey tskey-auth-XXXX
 
   Supplying -Site and -AuthKey implies unattended mode: the rig-LAN question
-  and the desktop-switch question are skipped unless -RigLanIndex or
-  -DesktopSwitch are given. With no parameters it prompts exactly as before.
+  and the desktop-switch question are skipped unless -RigLanAlias (or
+  -RigLanIndex) / -DesktopSwitch are given. With no parameters it prompts
+  exactly as before.
+
+  To convert the rig LAN unattended, name the adapter:
+      -RigLanAlias "Ethernet 4"
+  Get the name first from the read-only status script (no admin needed):
+      iwr -useb util.worldviz.com/prism-support-status.ps1 | iex
 #>
 
 param(
@@ -22,7 +28,11 @@ param(
     [string]$Site,
     # Tailscale auth key, pre-tagged tag:prism-<site>.
     [string]$AuthKey,
-    # Index of the rig-LAN adapter from the list the script prints. Omit to
+    # Rig-LAN adapter BY NAME, e.g. -RigLanAlias "Ethernet 4". Preferred over
+    # -RigLanIndex: a name is stable and knowable in advance, whereas a list
+    # position shifts when an adapter appears or disappears.
+    [string]$RigLanAlias,
+    # Rig-LAN adapter by its number in the list the script prints. Omit both to
     # leave the network alone.
     [int]$RigLanIndex = -1,
     # Place the customer Enable/Disable shortcuts on the shared desktop.
@@ -76,14 +86,38 @@ $gwCount = @($cfgs | Where-Object { $_.IPv4DefaultGateway }).Count
 if ($gwCount -gt 1) {
     Write-Host "WARNING: multiple default gateways found - one is likely the rig LAN." -ForegroundColor Red
 }
+# Resolve -RigLanAlias to a list position, so everything downstream works the
+# same whether the adapter was named or numbered.
+if ($RigLanAlias) {
+    $match = -1
+    for ($j = 0; $j -lt $cfgs.Count; $j++) {
+        if ($cfgs[$j].InterfaceAlias -eq $RigLanAlias) { $match = $j; break }
+    }
+    if ($match -lt 0) {
+        Write-Host ("No adapter named '" + $RigLanAlias + "'. Names present: " +
+                    (($cfgs | ForEach-Object { "'" + $_.InterfaceAlias + "'" }) -join ", ")) -ForegroundColor Red
+        Write-Host "Leaving the network as-is. Re-run with a name from that list." -ForegroundColor Yellow
+    } else {
+        if ($RigLanIndex -ge 0 -and $RigLanIndex -ne $match) {
+            Write-Host ("-RigLanAlias '" + $RigLanAlias + "' is [" + $match +
+                        "], not [" + $RigLanIndex + "]. Using the name.") -ForegroundColor Yellow
+        }
+        $RigLanIndex = $match
+        Write-Host ("Rig-LAN adapter '" + $RigLanAlias + "' resolved to [" + $match + "].") -ForegroundColor Gray
+    }
+}
+
 $ans = "n"
 if ($RigLanIndex -ge 0) {
     $ans = "y"
-    Write-Host ("Rig-LAN adapter given as parameter: [" + $RigLanIndex + "]") -ForegroundColor Gray
+    if (-not $RigLanAlias) {
+        Write-Host ("Rig-LAN adapter given as parameter: [" + $RigLanIndex + "] " +
+                    $cfgs[[Math]::Min($RigLanIndex, $cfgs.Count - 1)].InterfaceAlias) -ForegroundColor Gray
+    }
 } elseif (-not $unattended) {
     $ans = Read-Host "Is one of these adapters the PROJECTOR/RIG LAN (no internet)? (y/n)"
 } else {
-    Write-Host "Unattended: leaving the network alone (pass -RigLanIndex to change it)." -ForegroundColor Gray
+    Write-Host "Unattended: leaving the network alone (pass -RigLanAlias to change it)." -ForegroundColor Gray
 }
 if ($ans -match "^[yY]") {
     # Which adapter currently carries traffic to the internet? Never strip that
