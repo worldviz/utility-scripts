@@ -23,6 +23,14 @@
   On site, for a machine joined before shipping (no key needed):
     ... -Site ccreek -RigLanAlias "Ethernet 4"
 
+  Two-phase use (prep anyone can do, join needs a key from WorldViz):
+    Prep:  ... -Prep
+           Installs Tailscale (NOT joined), OpenSSH, firewall scope and the
+           WV support key, and reports whether the control plane is reachable.
+           No site name, no key, no questions.
+    Join:  ... -Site <site> -AuthKey tskey-auth-XXXX
+           Same line as always; on a prepped machine it takes about a minute.
+
   The join is fail-soft. If the Tailscale control plane is blocked or the join
   fails, the script says why, still installs OpenSSH (the slow part), and the
   SAME command can be re-run once the network is fixed.
@@ -46,11 +54,13 @@ param(
     # leave the network alone.
     [int]$RigLanIndex = -1,
     # Place the customer Enable/Disable shortcuts on the shared desktop.
-    [switch]$DesktopSwitch
+    [switch]$DesktopSwitch,
+    # Everything except the Tailscale join. No questions.
+    [switch]$Prep
 )
 
-# -Site supplied => run without asking questions.
-$unattended = [bool]$Site
+# -Site or -Prep supplied => run without asking questions.
+$unattended = [bool]($Site -or $Prep)
 
 # PowerShell variable names are case-insensitive: a local "$site" IS the -Site
 # parameter, and assigning it wiped the value. Keep the working copy distinct.
@@ -76,6 +86,10 @@ if ($siteName -and ($siteName -like "prism-*")) {
 }
 if ($siteName -and ($siteName -notmatch "^[a-z0-9][a-z0-9-]*$")) {
     Write-Host "-Site must be one short word: lowercase letters, digits, hyphens." -ForegroundColor Red
+    return
+}
+if ($Prep -and $AuthKey) {
+    Write-Host "-Prep means 'do everything except the join'; leave out -AuthKey, or drop -Prep to join." -ForegroundColor Red
     return
 }
 if ($AuthKey -and ($AuthKey.Trim() -notmatch "^tskey-")) {
@@ -284,6 +298,11 @@ if (-not (Test-Path $ts)) {
         if ($siteName -and $selfName) {
             # -Site given: decide without asking.
             $sameSite = ($selfName -eq ("prism-" + $siteName))
+        } elseif ($selfName -and $unattended) {
+            # -Prep: no site name to compare against and no questions allowed.
+            # Report it; the join step (with -Site) makes the real check.
+            Write-Host "Already joined. If this PC was imaged from another site, tell WorldViz -" -ForegroundColor Yellow
+            Write-Host "that name and tag belong to the OTHER site." -ForegroundColor Yellow
         } elseif ($selfName) {
             Write-Host "If this machine was imaged from another site, that name and tag belong" -ForegroundColor Yellow
             Write-Host "to the OTHER site - it must not keep them." -ForegroundColor Yellow
@@ -302,6 +321,8 @@ if (-not (Test-Path $ts)) {
         if ($AuthKey) {
             $key = $AuthKey.Trim()
             Write-Host "Using auth key supplied as a parameter." -ForegroundColor Gray
+        } elseif ($Prep) {
+            Write-Host "Prep: Tailscale installed, not joined. The join is a separate step." -ForegroundColor Gray
         } elseif ($unattended) {
             Write-Host "No -AuthKey given." -ForegroundColor Gray
         } else {
@@ -312,7 +333,17 @@ if (-not (Test-Path $ts)) {
                 Write-Host "Paste ONLY the key on one line, or press Enter to skip the join." -ForegroundColor Yellow
             }
         }
-        if (-not $key) {
+        if (-not $key -and $Prep) {
+            # Find out now, not on join day, whether this network lets the join through.
+            Write-Host "Checking HTTPS to the Tailscale control plane..." -ForegroundColor Gray
+            if (Test-HttpsOk $ctrlUrl "publicKey") {
+                $joinState = "prep"
+                Write-Host "  [OK] control plane reachable - the join will work from here" -ForegroundColor Green
+            } else {
+                $joinState = "blocked"
+                Write-Host ("  [X] " + $ctrlUrl + " did not answer") -ForegroundColor Red
+            }
+        } elseif (-not $key) {
             $joinState = "skipped"
             Write-Host "Skipping the join - continuing with the rest of the setup." -ForegroundColor Yellow
         } else {
@@ -428,7 +459,7 @@ if ($ans -match "^[yY]") {
 
 Write-Host ""
 Write-Host ("=" * 60) -ForegroundColor Yellow
-Write-Host "ALL QUESTIONS DONE - the rest runs unattended (15-20 min)." -ForegroundColor Yellow -BackgroundColor DarkBlue
+Write-Host "ALL QUESTIONS DONE - the rest runs unattended (up to 20 min the first time)." -ForegroundColor Yellow -BackgroundColor DarkBlue
 Write-Host "You may leave this window running. Do NOT close it or reboot." -ForegroundColor Yellow
 Write-Host ("=" * 60) -ForegroundColor Yellow
 
@@ -525,6 +556,7 @@ $tunnelOK = [bool]$tsip
 Write-Host ""
 Write-Host ("=" * 60) -ForegroundColor Green
 if ($tunnelOK) { Write-Host "Setup Complete" -ForegroundColor Yellow }
+elseif ($joinState -eq "prep") { Write-Host "Prep Complete - ready for the join" -ForegroundColor Yellow }
 else { Write-Host "Setup done EXCEPT the Tailscale join" -ForegroundColor Yellow }
 Write-Host ("=" * 60) -ForegroundColor Green
 Write-Host ""
@@ -533,6 +565,7 @@ switch ($joinState) {
     "blocked"      { $tsTxt = "[X] not joined - control plane BLOCKED by this network" }
     "failed"       { $tsTxt = "[X] not joined - join failed (see output above)" }
     "skipped"      { $tsTxt = "[ ] not joined - skipped (no key)" }
+    "prep"         { $tsTxt = "[OK] installed, not joined yet (prep); control plane reachable" }
     "notinstalled" { $tsTxt = "[X] Tailscale not installed - download blocked?" }
 }
 Write-Host ("  Tailscale:      " + $tsTxt) -ForegroundColor White
@@ -568,6 +601,10 @@ if ($joinState -eq "blocked" -or $joinState -eq "notinstalled") {
 }
 if ($tunnelOK) {
     Write-Host "READ THIS ADDRESS TO WORLDVIZ:  $tsip" -ForegroundColor Yellow -BackgroundColor DarkBlue
+} elseif ($joinState -eq "prep") {
+    Write-Host "PREP DONE. Next: the join command from WorldViz (about a minute)." -ForegroundColor Yellow -BackgroundColor DarkBlue
+    Write-Host "Do NOT click 'Log in' on the Tailscale tray icon - a browser login" -ForegroundColor Yellow
+    Write-Host "joins this PC without its site tag, so it is not isolated." -ForegroundColor Yellow
 } else {
     Write-Host "When the network is fixed, run the SAME command again." -ForegroundColor Yellow -BackgroundColor DarkBlue
     Write-Host "Everything already done is skipped; only the join remains." -ForegroundColor Yellow
