@@ -14,9 +14,14 @@
   Not (iwr ...).Content: GitHub Pages serves .ps1 as application/octet-stream,
   so on Windows PowerShell 5.1 .Content is a byte[] and Create() fails.
 
-  Supplying -Site and -AuthKey implies unattended mode: the rig-LAN question
-  and the desktop-switch question are skipped unless -RigLanAlias (or
-  -RigLanIndex) / -DesktopSwitch are given. With no parameters it prompts.
+  Supplying -Site implies unattended mode: the rig-LAN question and the
+  desktop-switch question are skipped unless -RigLanAlias (or -RigLanIndex) /
+  -DesktopSwitch are given, and a re-run checks the node identity itself.
+  -Site without -AuthKey on an unjoined machine skips the join. With no
+  parameters it prompts.
+
+  On site, for a machine joined before shipping (no key needed):
+    ... -Site ccreek -RigLanAlias "Ethernet 4"
 
   The join is fail-soft. If the Tailscale control plane is blocked or the join
   fails, the script says why, still installs OpenSSH (the slow part), and the
@@ -44,8 +49,8 @@ param(
     [switch]$DesktopSwitch
 )
 
-# Parameters supplied => run without asking questions.
-$unattended = ($Site -and $AuthKey)
+# -Site supplied => run without asking questions.
+$unattended = [bool]$Site
 
 # PowerShell variable names are case-insensitive: a local "$site" IS the -Site
 # parameter, and assigning it wiped the value. Keep the working copy distinct.
@@ -297,6 +302,8 @@ if (-not (Test-Path $ts)) {
         if ($AuthKey) {
             $key = $AuthKey.Trim()
             Write-Host "Using auth key supplied as a parameter." -ForegroundColor Gray
+        } elseif ($unattended) {
+            Write-Host "No -AuthKey given." -ForegroundColor Gray
         } else {
             while ($true) {
                 $key = (Read-Host "Tailscale auth key from WorldViz (tskey-auth-...), or press Enter to SKIP the join for now").Trim()

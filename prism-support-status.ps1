@@ -59,10 +59,30 @@ $defCount = @(Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyC
 if ($defCount -gt 1) {
     Write-Host ("  [!] " + $defCount + " default routes - possible rig-LAN gateway problem") -ForegroundColor Red
 }
-Write-Host "  internet (443 to Tailscale): " -NoNewline -ForegroundColor White
-$net = Test-NetConnection controlplane.tailscale.com -Port 443 -WarningAction SilentlyContinue
-if ($net.TcpTestSucceeded) { Write-Host "[OK] reachable" -ForegroundColor Green }
+Write-Host "  Tailscale control plane (HTTPS): " -NoNewline -ForegroundColor White
+# A real HTTPS GET, not a TCP test: some firewalls accept the TCP connect to
+# controlplane.tailscale.com and then drop the session (Odessa, 2026-09-30).
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$ctrlOK = $false
+try {
+    $r = Invoke-WebRequest -Uri "https://controlplane.tailscale.com/key?v=71" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+    $body = $r.Content
+    if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
+    $ctrlOK = ($r.StatusCode -eq 200 -and $body -match "publicKey")
+} catch { }
+if ($ctrlOK) { Write-Host "[OK] reachable" -ForegroundColor Green }
 else { Write-Host "[X] BLOCKED or no internet" -ForegroundColor Red }
+
+Write-Host ""
+Write-Host "-- All IPv4 addresses (incl. disconnected adapters)" -ForegroundColor Cyan
+# ipconfig hides addresses on disconnected adapters; a stale static address in
+# the rig-LAN subnet on an unplugged NIC is a known landmine (ccreek).
+Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -notlike "127.*" } | ForEach-Object {
+    $st = (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Status
+    Write-Host ("  " + $_.InterfaceAlias.PadRight(14) + ($_.IPAddress + "/" + $_.PrefixLength).PadRight(20) +
+                $_.PrefixOrigin.ToString().PadRight(8) + " " + $st) -ForegroundColor White
+}
 
 Write-Host ""
 Write-Host "Read this screen to WorldViz support." -ForegroundColor Yellow
