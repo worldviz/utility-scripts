@@ -53,11 +53,21 @@ Get-NetIPConfiguration | Where-Object { $_.IPv4Address } | ForEach-Object {
     $gw = ($_.IPv4DefaultGateway.NextHop -join ",")
     $gwTxt = "no gateway"
     if ($gw) { $gwTxt = "gateway " + $gw }
-    Write-Host ("  " + $_.InterfaceAlias.PadRight(14) + ($_.IPv4Address.IPAddress -join ",").PadRight(18) + $gwTxt) -ForegroundColor White
+    Write-Host ("  {0,-26} {1,-18} {2}" -f $_.InterfaceAlias, ($_.IPv4Address.IPAddress -join ","), $gwTxt) -ForegroundColor White
 }
-$defCount = @(Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue).Count
-if ($defCount -gt 1) {
-    Write-Host ("  [!] " + $defCount + " default routes - possible rig-LAN gateway problem") -ForegroundColor Red
+# Two default routes are only a problem when they lead to DIFFERENT gateways
+# (wired + Wi-Fi on the same office network is fine), or when one leads to
+# the rig router, which is 10.1.1.1 across the fleet and has no internet.
+$defRoutes = @(Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue)
+$hops = @($defRoutes | ForEach-Object { $_.NextHop } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Select-Object -Unique)
+$rigHops = @($hops | Where-Object { $_ -like "10.1.1.*" })
+if ($rigHops.Count) {
+    Write-Host ("  [!] default route via " + ($rigHops -join ",") + " - likely the rig router (no internet).") -ForegroundColor Red
+    Write-Host "      Convert that adapter with -RigLanAlias." -ForegroundColor Red
+} elseif ($hops.Count -gt 1) {
+    Write-Host ("  [!] default routes via different gateways (" + ($hops -join ", ") + ") - one may be the rig LAN") -ForegroundColor Red
+} elseif ($defRoutes.Count -gt 1) {
+    Write-Host ("  note: " + $defRoutes.Count + " adapters share gateway " + ($hops -join ",") + " (e.g. wired + Wi-Fi) - fine") -ForegroundColor Gray
 }
 Write-Host "  Tailscale control plane (HTTPS): " -NoNewline -ForegroundColor White
 # A real HTTPS GET, not a TCP test: some firewalls accept the TCP connect to
@@ -80,8 +90,8 @@ Write-Host "-- All IPv4 addresses (incl. disconnected adapters)" -ForegroundColo
 Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -notlike "127.*" } | ForEach-Object {
     $st = (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue).Status
-    Write-Host ("  " + $_.InterfaceAlias.PadRight(14) + ($_.IPAddress + "/" + $_.PrefixLength).PadRight(20) +
-                $_.PrefixOrigin.ToString().PadRight(8) + " " + $st) -ForegroundColor White
+    Write-Host ("  {0,-26} {1,-20} {2,-9} {3}" -f $_.InterfaceAlias, ($_.IPAddress + "/" + $_.PrefixLength),
+                $_.PrefixOrigin, $st) -ForegroundColor White
 }
 
 Write-Host ""

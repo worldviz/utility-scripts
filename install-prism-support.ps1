@@ -147,13 +147,18 @@ foreach ($c in $cfgs) {
     $gw = ($c.IPv4DefaultGateway.NextHop -join ",")
     $gwTxt = "no gateway"
     if ($gw) { $gwTxt = "gateway " + $gw }
-    Write-Host ("  [{0}] {1}  {2}  ({3})" -f $i, $c.InterfaceAlias.PadRight(14), ($c.IPv4Address.IPAddress -join ","), $gwTxt) -ForegroundColor White
+    Write-Host ("  [{0}] {1,-26} {2,-16} ({3})" -f $i, $c.InterfaceAlias, ($c.IPv4Address.IPAddress -join ","), $gwTxt) -ForegroundColor White
     $i++
 }
 Write-Host ""
-$gwCount = @($cfgs | Where-Object { $_.IPv4DefaultGateway }).Count
-if ($gwCount -gt 1) {
-    Write-Host "WARNING: multiple default gateways found - one is likely the rig LAN." -ForegroundColor Red
+# Only different gateways, or the fleet rig router (10.1.1.1, no internet),
+# are a problem. Wired + Wi-Fi on the same office network is fine.
+$hops = @($cfgs | ForEach-Object { $_.IPv4DefaultGateway.NextHop } | Where-Object { $_ } | Select-Object -Unique)
+$rigHops = @($hops | Where-Object { $_ -like "10.1.1.*" })
+if ($rigHops.Count) {
+    Write-Host ("WARNING: default gateway " + ($rigHops -join ",") + " is likely the rig router (no internet).") -ForegroundColor Red
+} elseif ($hops.Count -gt 1) {
+    Write-Host ("WARNING: default gateways differ (" + ($hops -join ", ") + ") - one is likely the rig LAN.") -ForegroundColor Red
 }
 # Resolve -RigLanAlias to a list position, so everything downstream works the
 # same whether the adapter was named or numbered.
